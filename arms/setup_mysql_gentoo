@@ -1,0 +1,20 @@
+#!/bin/bash
+
+#fresh_os=true
+#fresh_mariadb=true
+
+while true; do
+  if [ "$fresh_os" ]; then
+    emerge --sync || break
+    emerge -u glibc || break
+    emerge -u portage || break
+  fi
+  if [ "$fresh_mariadb" ]; then
+    ACCEPT_KEYWORDS="~amd64" USE="extraengine galera oqgraph profiling sphinx sst-rsync sst-xtrabackup" emerge -u ">=mariadb-10.2" || break
+    emerge --config mariadb || break
+    service mysql start || break
+  fi
+  cat ./init_db | mysql -p || break
+  break
+done
+

@@ -1,0 +1,228 @@
+#!/bin/bash
+
+if [ ! -d lib ]; then
+  err "Missing lib folder. Make sure you run this script a place with the lib folder and arms_agent.config"
+  exit 1
+fi
+
+source lib/common || exit 1
+for file in $(find lib -mindepth 1 -maxdepth 1 -not -name common -not -name ".*" -type f); do
+  source $file || exit 1
+done
+
+establish_connection() {
+  host=$db_host db=$db_name user=$db_user pass=$db_pass mysql_connect || return 1
+}
+
+# usage: insert_into_output_table {file_name containing content}
+# if file doesn't exist, returns true but no output_id
+# returns 1 if anything fails
+# sets output_id to inserted id if record was successfully inserted
+insert_into_output_table() {
+local file_name=$1
+local content id
+output_id=null
+out "insert_into_output_table $file_name"
+try
+  if [ -f $file_name ]; then
+    eval "content=\$(<$file_name)"
+    content=${content//'/\\'}
+    if [ "$content" ]; then
+      mysql_query "
+        insert into output set
+          creation_time=now()
+          , content='$content'
+        ;
+        " || { err "couldn't insert record into output table."; fail }
+
+      db_fetch_single_value "select last_insert_id();" || fail
+      output_id=$r
+    else
+      out "file exists, but has no content, so no output will be recorded."
+    fi
+  else
+    out "file $file_name doesn't exist, so no output will be recorded."
+  fi
+end_try
+
+handle_return
+}
+
+record_results_of_completed_process() {
+out "record_results_of_completed_process job_id=$job_id"
+try
+  cd job_${job_id} || fail
+
+  local job_status=failed
+  [ -f succeeded ] && job_status=succeeded
+
+  insert_into_output_table output || fail
+  local oid=$output_id
+  insert_into_output_table error || fail
+  local eid=$output_id
+
+  mysql_query "
+    insert into task_status_change set 
+      task_request_id=$(<task_request_id)
+      , output_id=$oid
+      , error_id=$eid
+      , event_time=now()
+      , new_status='done'
+      , result='$job_status'
+    ;
+    " || { err "failed to insert task change record."; fail }
+
+  cd .. || fail
+  rm -rf job_${job_id} 
+end_try
+handle_return
+}
+
+fetch_a_task() {
+out "fetch_a_task"
+try
+  mysql_query "
+    select tr.task_request_id, s.content, tr.parameters 
+    from task_request_not_done trnd 
+    inner join task_request tr using (task_request_id)
+    inner join script s using (script_id)
+    left join task_status_change tsc on trnd.task_request_id = tsc.task_request_id
+    where host_id = $host_id
+    and tsc.task_request_id is null
+    limit 1
+    ;
+    " || { err "failed to fetch new tasks."; fail }
+end_try
+handle_return
+}
+
+launch_task() {
+out "launch_task job_id=$job_id"
+try
+  grab_row task_request_id script_content script_parameters || { err "failed to get row from array."; fail }
+  mysql_query "
+  insert into task_status_change set
+    task_request_id = $task_request_id
+    , event_time = now()
+    , new_status = 'started'
+  ;
+  " || { err "failed to update task status."; fail }
+
+  mkdir job_${job_id} || fail
+  cd job_${job_id} || fail
+  echo "$task_request_id" >task_request_id || fail
+  echo "$script_content" >request || fail
+  if [ "$synchronous" ]; then
+    sh request $script_parameters >output 2>error </dev/null
+    cd .. || fail
+    record_results_of_completed_process || fail
+  else
+    sh request $script_parameters >output 2>error </dev/null &
+    track_process || fail
+    cd .. || fail
+  fi
+end_try
+handle_return
+}
+
+main_loop() {
+local iteration=1 short_sleep
+min_wait=${min_wait:-50}
+max_wait=${max_wait:-70}
+out "arms_agent main_loop"
+try
+  while true; do 
+    if grab_completed_process; then
+      out "Found a completed process" 
+      record_results_of_completed_process || fail
+      continue # we need to keep pulling completed processes out until they are gone
+    fi
+    break
+  done
+
+  if can_launch_more_processes; then
+    out "We have more room for processes"
+    fetch_a_task || fail
+
+    if more_rows_to_read; then
+      out "Found a task"
+      launch_task || fail
+      short_sleep=1
+    else
+      out "No tasks to do"
+    fi
+  else
+    out "No room for more processes"
+  fi
+
+  iteration=$((iteration+1))
+  [ "$max_iterations" ] && [[ $iteration > $max_iterations ]] && {
+    out "Max iterations reached ($iteration > $max_iterations)"
+    break
+  }
+
+  # there's nothing to do right now, let's rest a bit before trying again
+  if [[ $max_wait > 0 ]]; then
+    if [ "$short_sleep" ]; then
+      out "sleeping 1 second..."
+      sleep 1
+    else
+      out "sleeping between $min_wait and $max_wait seconds"
+      random_sleep $min_wait $max_wait
+    fi
+  fi 
+
+  unset short_sleep
+  # loop forever, unless we hit a critical failure
+  continue
+end_try
+handle_return
+}
+
+main() {
+undive
+try
+  deep_dive lock arms || { err "arms agent is already running"; exit 1; }
+
+  if [ ! -f arms_agent.config ]; then
+    err "Missing arms_agent.config. It must exist in the current directory."
+    exit 1
+  fi
+
+  source arms_agent.config
+  require_var host_id db_host db_name db_pass || {
+    err "Make sure that you have defined this variable in your arms_agent.config file"
+    exit 1
+  }
+
+  db_user=agent_${host_id}
+
+  agent_tmp=/tmp/arms_agent
+  rm -rf $agent_tmp &>/dev/null
+  mkdir $agent_tmp || exit 1
+  cd $agent_tmp || exit 1
+
+  # optional variables which may be set in arms_agent.config, or in environment
+  #   max_processes : maximum number of processes to run at once
+  #   max_iterations : maximum number of times to pass through the main loop. If this is unset, will run indefinitely.
+  #   synchronous : if set, means tasks will be lauched syncronously instead of in the background
+  #   min_wait=50 : number of seconds, minimum, to wait between task pickup cycles
+  #   max_wait=70 : as above, but for maximum wait
+
+  initialize_process_tracking ${max_processes:-4}
+
+  out "Establishing db connection..."
+  establish_connection || exit 1
+
+  undive
+  main_loop || exit 1
+
+  # It's okay if exit happens before the lock is released. 
+  # Stale locks are automatically cleaned up when this script starts.
+  unlock arms &>/dev/null
+end_try
+handle_return
+}
+
+main || exit 1
+

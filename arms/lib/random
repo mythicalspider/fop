@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# usage: random {p=number of possibilities}
+#   sets r={random number between 0 and p-1}
+#   it will be fairly evenly distributed below about 1000, but will become more biased as it gets higher
+unset random
+random() {
+  local p=$1
+  r=$((RANDOM % p))
+}
+
+# usage: random_sleep {min} {max}
+#   will sleep for a random interval between min and max
+unset random_sleep
+random_sleep() {
+  local min=$1; shift
+  local max=$1
+  random $((max-min))
+  sleep $((min+r))
+}
+

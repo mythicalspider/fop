@@ -1,0 +1,10 @@
+#!/bin/bash
+
+strip_hash_comments() {
+  sed 's/\(.*\)#.*/\1/'
+}
+
+strip_bar_comments() {
+  sed 's/\(.*\)-- .*/\1/'
+}
+

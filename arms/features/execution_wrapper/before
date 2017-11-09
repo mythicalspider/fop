@@ -1,0 +1,13 @@
+#!/bin/bash
+
+main() {
+try
+  #build_folder=/tmp/fop_build/$$
+  build_folder=/tmp/fop_build
+  rm -rf $build_folder &>/dev/null || exit 1
+  mkdir -p $build_folder || exit 1
+end_try
+handle_return
+}
+
+main || exit 1

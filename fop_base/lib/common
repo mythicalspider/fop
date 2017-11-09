@@ -1,0 +1,116 @@
+#!/bin/bash
+
+# setup used by most other script libraries in lib folder
+# soure this before other libraries
+
+shopt -s expand_aliases      # make sure aliases are expanded even for non-interactive scripts
+set -u                       # error when a script attempts to use an unset variable
+
+alias err='echo -e >&2 "ERROR:"'
+alias out='[ $debug -gt 0 ] && printf "[%${debug_digits}d] " $debug && echo -e'
+alias out_short='[ $debug -gt 0 ] && echo -e'
+alias deep_out='[ $debug -gt 10 ] && printf "[%${debug_digits}d] " $((debug-10)) && echo -e'
+alias deep_out_short='[ $debug -gt 10 ] && echo -e'
+alias super_out='[ $debug -gt 100 ] && printf "[%${debug_digits}d] " $((debug-100)) && echo -e'
+alias super_out_short='[ $debug -gt 100 ] && echo -e'
+
+# dive and undive should be used immediately in front of a command or at the beginning of a function with a local debug
+#   or it will shift the debug level for all code that follows
+alias dive='debug=$((debug-1))'
+alias undive='debug=$((debug+1))'
+alias deep_dive='debug=$((debug-10))'
+alias deep_undive='debug=$((debug+10))'
+alias super_dive='debug=$((debug-100))'
+alias super_undive='debug=$((debug+100))'
+
+# exception handling
+# usage example:
+#   function do_stuff() {
+#     try
+#       open_connection || fail
+#       for ((i = 0; i < 10; i++)); do 
+#         stuff || fail
+#       done
+#       maybe_break
+#      
+#       more_stuff
+#     end_try
+#     close_connection
+#     handle_return
+#   }
+
+# default debug level is 1. Set to 0 for no output except for errors.
+export debug=${debug:-1}
+export debug_digits=${#debug}
+# only run this once within a function definition
+alias try='local debug=$((debug-1)) return_value=0; while true; do'
+alias end_try='break; done; debug=$((debug+1))'
+
+alias fail='{ return_value=1; break; }'
+
+# should be placed after any loop inside of an exception catching block
+alias maybe_break='[ $return_value == 0 ] || break'
+alias maybe_exit='[ $return_value == 0 ] || exit 1'
+
+# should be at the end of every function which contains a try / end_try block
+alias handle_return='return $return_value'
+alias handle_exit='exit $return_value'
+
+# newline
+newline=$'\n'
+
+# usage: echo " blah   " | trim
+trim() {
+sed -e 's/^[[:space:]]*\(.*\)[[:space:]]*$/\1/'
+}
+
+# usage: show_array {var name}
+show_array() {
+local name=$1 i size
+#eval "size=\${#${name}[*]}"
+echo "size=$size"
+for ((i=0; i<size; i++)); do
+  eval "echo \"${name}[$i]=\\\"\${$name[$i]}\\\"\""
+done
+}
+
+# usage: echo " blah   " | aligned_trim
+# will keep indentation, and only strip leading spaces equal to the number on the first line
+aligned_trim() {
+local trim_string 
+IFS= read -r line
+while [ ! "${line:-}" ]; do
+  IFS= read -r line
+done
+if [[ "$line" =~ ^(\ *)(.*)(\ *)$ ]]; then
+  trim_string=${BASH_REMATCH[1]}
+  line=${BASH_REMATCH[2]}
+  echo "${line:-}"
+fi
+while IFS= read -r line; do
+  if [[ "$line" =~ ^${trim_string}(.*)(\ *)$ ]]; then
+    line=${BASH_REMATCH[1]}
+    echo "${line:-}"
+  elif [[ "$line" =~ ^(\ *)(.*)(\ *)$ ]]; then
+    line=${BASH_REMATCH[2]}
+    echo "${line:-}"
+  fi
+done
+}
+
+# usage: open_fifo {file descriptor to connect to fifo}
+open_fifo() {
+local pipe=$(mktemp -u)
+local fd=$1
+mkfifo $pipe
+eval "exec ${fd}<>${pipe}"
+rm $pipe 
+}
+
+# usage: close_fifo {file descriptor to connect to fifo}
+close_fifo() {
+exec $1>&-
+}
+
+true                      # make sure we return successfully so calling script can properly move forward
+

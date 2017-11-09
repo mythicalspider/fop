@@ -1,0 +1,12 @@
+#!/bin/bash
+
+main() {
+try
+  # clean up after ourselves
+  rm -rf /tmp/fop_build &>/dev/null
+end_try
+handle_return
+}
+
+main || exit 1
+

@@ -1,0 +1,68 @@
+#!/bin/bash
+
+run_test() {
+undive
+try
+  out "Setting up test data..."
+  mysql_bulk "
+    insert into host set
+      host_id = 1
+      , name = 'test_host'
+      , primary_ip = ''
+      ;
+
+    insert into script set
+      script_id = 1
+      , name = 'test_script'
+      , version = 1
+      , parameters = ''
+      , content = 'echo success; touch succeeded'
+      ;
+
+    insert into task_request set 
+      task_request_id = 1
+      , host_id = 1
+      , script_id = 1
+      , parameters = ''
+      ;
+  " || fail
+
+  cd $build_folder || fail
+
+  out "Creating arms_agent.config"
+  cat <<-EOF >arms_agent.config || fail
+    db_host=127.0.0.1
+    db_name=$central_db_name
+    db_pass=insecure
+    host_id=1
+    max_iterations=2
+    synchronous=1
+    min_wait=0
+    max_wait=0
+EOF
+
+  undive db_host=127.0.0.1 db_name=$central_db_name admin_user=test admin_pass=insecure agent_host_id=1 agent_pass=insecure bin/create_db_user_for_agent || fail
+
+  undive bin/arms_agent || fail
+
+  out "Checking results in db..."
+  db_fetch_single_value "select count(*) from task_status_change 
+                         where new_status='started' and task_request_id=1;" || fail
+  assert_equals "${r:-}" 1 "Missing proper 'started' task_status_change record" || fail
+
+  db_fetch_single_value "select count(*) from task_status_change 
+                         where new_status='done' and task_request_id=1 and result='succeeded';" || fail
+  assert_equals "${r:-}" 1 "Missing proper 'done' task_status_change record" || fail
+
+  db_fetch_single_value "select count(*) from task_request_not_done 
+                         where task_request_id=1;" || fail
+  assert_equals "${r:-}" 0 "task_request_not_done wasn't removed after task was completed" || fail
+
+  cd $OLDPWD || fail
+
+end_try
+handle_return
+}
+
+run_test || return 1
+

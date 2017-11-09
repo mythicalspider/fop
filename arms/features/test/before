@@ -1,0 +1,53 @@
+#!/bin/bash
+
+{
+try
+  if [ ! "$build_folder" ]; then
+    err "build_folder not set"
+    fail
+  fi
+
+  mkdir -p $build_folder/tests || fail
+end_try
+maybe_exit
+}
+
+# usage: assert_equals {actual value} {expected value} [{error message}]
+assert_equals() {
+local actual=$1; shift
+local expected=$1; shift
+
+if [ "$actual" != "$expected" ]; then
+  if [ "${1:-}" ]; then
+    err "$1"
+  else
+    err "Values don't match."
+  fi
+  err "Expected: \"$expected\""
+  err "Actual: \"$actual\""
+  return 1
+fi
+
+return 0
+}
+
+# here's an trivial example of how tests can be made: (uncomment and run to see the demo)
+
+# mkdir -p $build_folder/tests/first_group || exit 1
+# cat >$build_folder/tests/test1 <<EOF
+# true
+# EOF
+# cat >$build_folder/tests/test2 <<EOF
+# true
+# EOF
+# cat >$build_folder/tests/first_group/test3 <<EOF
+# true
+# EOF
+# cat >$build_folder/tests/first_group/test4 <<EOF
+# echo "Failed for a dumb reason."
+# false
+# EOF
+# cat >$build_folder/tests/first_group/test5 <<EOF
+# true
+# EOF
+

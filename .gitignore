@@ -1,0 +1,12 @@
+.DS_Store
+.classpath
+.project
+.idea
+.settings
+*.sw*
+*.pyc
+*.class
+# potential log files
+*.log
+*.iml
+

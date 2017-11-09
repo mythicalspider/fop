@@ -1,0 +1,45 @@
+#!/bin/bash
+
+if [ ! -d lib ]; then
+  err "Missing lib folder. Make sure you run this script a place with the lib folder and arms_agent.config"
+  exit 1
+fi
+
+source lib/common || exit 1
+for file in $(find lib -mindepth 1 -maxdepth 1 -not -name common -not -name ".*" -type f); do
+  source $file || exit 1
+done
+
+establish_connection() {
+  host=$db_host db=$db_name user=$admin_user pass=$admin_pass mysql_connect || return 1
+}
+
+main() {
+require_var_or_ask db_host "host of central db (ip or domain name)"
+require_var_or_ask db_name "name of database"
+require_var_or_ask agent_host_id "agent host id"
+require_var_or_ask agent_pass "password for this agent"
+require_var_or_ask admin_user "admin user name"
+require_var_or_ask admin_pass "admin password"
+agent_user=agent_${agent_host_id}
+
+undive
+out "Creating user $agent_user..."
+try
+  out "Establishing db connection..."
+  establish_connection || exit 1
+
+  out "Granting permissions..."
+  mysql_bulk "
+    create user if not exists ${agent_user}@'localhost' identified by '${agent_pass}';
+    grant insert on ${db_name}.output to '${agent_user}';
+    grant insert on ${db_name}.task_status_change to '${agent_user}';
+    grant select on ${db_name}.task_request_not_done to '${agent_user}';
+    grant select on ${db_name}.task_request to '${agent_user}';
+    grant select on ${db_name}.script to '${agent_user}';
+    grant select on ${db_name}.task_status_change to '${agent_user}';
+  " || fail
+end_try
+}
+
+main 

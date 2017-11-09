@@ -1,0 +1,160 @@
+#!/bin/bash
+
+# usage: cat file | hydrate_template >output
+#   will replace bash variables and expressions
+hydrate_template() {
+try
+  while IFS= read -r line; do
+    line="${line//\"/\\\"}"
+    eval "echo \"$line\"" || fail
+  done
+end_try
+handle_return
+}
+
+# usage: cat file.slice | hydrate_slice {file name to patch}
+#   will patch the given file with the slice fed through stdin and 
+#   replace the target file with the patched result if successful
+#
+# slice file includes special commands which change the slice mode for the following lines
+# commands always look like: ---===< command >===---
+#   with 3 or more - and = on each side
+#   and command one of:
+#     find exact
+#     find wildcard
+#     find regex
+#     insert exact
+#     insert template
+#     ignore
+hydrate_slice() {
+try
+  local file in_file out_file command content reached_end found mode maybe_mode
+  file="$1"
+
+  out "Applying slice to file ${file}..."
+
+  if [ -f "${file}.new" ]; then
+    err "${file}.new already exists. This is needed to create the temporary version of the patched file."
+    fail
+  fi
+
+  if [ -f "$file" ]; then
+    exec {in_file}<${file} || fail
+  else
+    reached_end=yes
+  fi
+  exec {out_file}>${file}.new || fail
+
+  mode="insert exact"
+  deepdive
+  while IFS= read -r content; do
+    if [[ "$content" =~ ---+===+\<\ (.*)\ \>===+---+ ]]; then
+      maybe_mode=${BASH_REMATCH[1]}
+      if [ "$maybe_mode" == 'jump to end' ]; then
+        out "jumped to end of file"
+        if [ ! "${reached_end:-}" ]; then
+          cat <&$in_file >&$out_file || fail
+          reached_end=yes
+        fi
+      else
+        mode=$maybe_mode
+        out "mode switch: [$mode]"
+      fi
+      continue
+    fi
+
+    case "$mode" in
+      'find exact')
+        unset found
+        if [ ! "${reached_end:-}" ]; then
+          while true; do
+            IFS= read -ru ${in_file} line || {
+              reached_end=yes
+              break
+            }
+            echo "$line" >&$out_file || fail
+            if [[ "$line" == "$content" ]]; then
+              found=yes
+              break
+            fi
+          done; maybe_break
+        fi
+
+        if [ ! "${found:-}" ]; then
+          err "Can't find the requested line: $content"
+          fail
+        fi
+        ;;
+      'find wildcard')
+        unset found
+        if [ ! "${reached_end:-}" ]; then
+          while true; do
+            IFS= read -ru ${in_file} line || {
+              reached_end=yes
+              break
+            }
+            echo "$line" >&$out_file || fail
+            if eval "[[ \"$line\" == \"${content//\*/\"*\"}\" ]]"; then
+              found=yes
+              break
+            fi
+          done; maybe_break
+        fi
+
+        if [ ! "${found:-}" ]; then
+          err "Can't find the requested line: $content"
+          fail
+        fi
+        ;;
+      'find regex')
+        unset found
+        if [ ! "${reached_end:-}" ]; then
+          while true; do
+            IFS= read -ru ${in_file} line || {
+              reached_end=yes
+              break
+            }
+            echo "$line" >&$out_file || fail
+            if eval "[[ \"$line\" =~ ${content// /\\ } ]]"; then
+              found=yes
+              break
+            fi
+          done; maybe_break
+        fi
+
+        if [ ! "${found:-}" ]; then
+          err "Can't find the requested line: $content"
+          fail
+        fi
+        ;;
+      'insert exact')
+        echo "$content" >&$out_file
+        ;;
+      'insert template')
+        line="${content//\"/\\\"}"
+        eval "echo \"$line\"" >&$out_file || fail
+        ;;
+      'jump to end')
+        ;;
+      'ignore')
+        ;;
+      *)
+        err "unknown slice command: [$mode]"
+        fail
+        ;;
+    esac
+  done
+  deep_undive    
+  maybe_break
+
+  # flush remaining input file lines
+  if [ ! "${reached_end:-}" ]; then
+    cat <&$in_file >&$out_file || fail
+  fi
+
+  mv ${file}.new ${file} || fail
+  exec {in_file}<&- {out_file}>&-
+end_try
+handle_return
+}
+

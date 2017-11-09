@@ -1,0 +1,11 @@
+#!/bin/bash
+
+unset rcp
+rcp() {
+local shell="ssh"
+if [ "${port:-}" ]; then
+    shell="ssh -p $port"
+fi
+RSYNC_RSH="$shell" rsync -aIu --copy-unsafe-links --exclude '*.sw*' "$@"
+}
+

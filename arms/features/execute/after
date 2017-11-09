@@ -1,0 +1,12 @@
+#!/bin/bash
+
+main() {
+out "Applying database changes..."
+try
+  mysql_bulk "$(<$build_folder/init_db.sql)" || exit 1
+end_try
+handle_return
+}
+
+main || exit 1
+

@@ -1,0 +1,88 @@
+#!/bin/bash
+
+
+# from: https://mariadb.com/kb/en/mariadb/getting-started-with-mariadb-galera-cluster/
+
+####################################################################################################
+# for debian
+####################################################################################################
+apt-get install software-properties-common
+apt-key adv --recv-keys --keyserver keyserver.ubuntu.com 0xF1656F24C74CD1D8
+add-apt-repository 'deb [arch=amd64] http://nyc2.mirrors.digitalocean.com/mariadb/repo/10.2/debian stretch main'
+apt-get update
+# this will ask for a root pw to be configured
+apt-get install mariadb-server
+
+####################################################################################################
+# for centos 7
+####################################################################################################
+
+# paste this into /etc/yum.repos.d/ 
+
+cat <<EOF >/etc/yum.repos.d/mariadb.repo
+# MariaDB 10.2 CentOS repository list - created 2017-07-31 16:30 UTC
+# http://downloads.mariadb.org/mariadb/repositories/
+[mariadb]
+name = MariaDB
+baseurl = http://yum.mariadb.org/10.2/centos7-amd64
+gpgkey=https://yum.mariadb.org/RPM-GPG-KEY-MariaDB
+gpgcheck=1
+EOF
+
+yum install MariaDB-server MariaDB-client
+
+####################################################################################################
+# for all
+####################################################################################################
+
+#cat <<EOF >/etc/mysql/mariadb.conf.d/server.cnf   # debian
+cat <<EOF >/etc/my.cnf.d/server.cnf                 # cent
+# this is read by the standalone daemon and embedded servers
+[server]
+
+# this is only for the mysqld standalone daemon
+[mysqld]
+
+[galera]
+# Mandatory settings
+wsrep_on=ON
+#wsrep_provider=/usr/lib/galera/libgalera_smm.so    # debian
+wsrep_provider=/usr/lib64/galera/libgalera_smm.so  # centos
+wsrep_cluster_address=gcomm://192.168.51.104?pc.wait_prim=no   # cent
+#wsrep_cluster_address=gcomm://192.168.202.102?pc.wait_prim=no # deb
+binlog_format=row
+default_storage_engine=InnoDB
+innodb_autoinc_lock_mode=2
+#
+# Allow server to accept connections on all interfaces.
+#
+bind-address=0.0.0.0
+#
+# Optional setting
+wsrep_slave_threads=2
+innodb_flush_log_at_trx_commit=0
+
+# this is only for embedded server
+[embedded]
+
+# This group is only read by MariaDB servers, not by MySQL.
+# If you use the same .cnf file for MySQL and MariaDB,
+# you can put MariaDB-only options here
+[mariadb]
+
+# This group is only read by MariaDB-10.1 servers.
+# If you use the same .cnf file for MariaDB of different versions,
+# use this group for options that older servers don't understand
+[mariadb-10.1]
+EOF
+
+# start first cluster node: 
+# galera_new_cluster
+# or: mysqld --wsrep-new-cluster
+
+# join an existing cluster node:
+# mysqld --wsrep_cluster_address=gcomm://192.168.51.104
+
+# to start up a cluster that was shut down:
+# mysqld --wsrep_cluster_address=gcomm://<node1 address>,<node2 address>,...?pc.wait_prim=no
+

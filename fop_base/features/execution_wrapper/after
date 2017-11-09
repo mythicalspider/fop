@@ -1,0 +1,11 @@
+#!/bin/bash
+
+main() {
+try
+  out "Build scripts created in: $build_folder"
+end_try
+handle_return
+}
+
+main || exit 1
+

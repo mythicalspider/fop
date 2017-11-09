@@ -1,0 +1,386 @@
+#!/bin/bash
+
+# requires coproc, stdbuf, mysql
+
+# Derived from: BASIC MYSQL SESSION IMPLEMENTATION FOR BASH (by Norman Geist 2015)
+# Expanded by: Jeremy Gurr 2017
+
+#  # Example usage
+#  #define timeout for read command, in case of server error etc.
+#  export MYSQL_READ_TIMEOUT=10
+#  
+#  # Connect to db and get $HANDLE
+#  user=mydbuser db=mydb host=myhost mysql_connect 
+#  
+#  #query db and get $DATA
+#  echo "SELECT dt_whatever from tbl_lol WHERE dt_rofl=10" | mysql_query 
+#  
+#  #close connection
+#  mysql_close
+#  
+#  
+#  $DATA[0] = affected rows/number of sets;
+#  $DATA[1] = number of key=>values pairs following;
+#  $DATA[2] = key1;
+#  $DATA[3] = value1;
+#        [...]
+#  $DATA[n-1] = keyn;
+#  $DATA[n]   = valuen;
+#  
+#  # two column query loop example
+#  
+#  fields=2
+#  for ((i=2; $i<$((${DATA[0]}*${DATA[1]}*$fields)); i+=$((${DATA[1]}*$fields))))
+#  do
+#      field1key   = ${DATA[$i]};   #this is "dt_id"
+#      field1value = ${DATA[$i+1]}; #this is the value for dt_id
+#      field2key   = ${DATA[$i+2]}; #this is "dt_name"
+#      field2value = ${DATA[$i+3]}; #this is the value  for dt_name
+#  done
+#
+#  # managing multiple connections at the same time:
+#  user=mydbuser db=mydb host=myhost1 mysql_connect && con1=$HANDLE
+#  user=mydbuser db=mydb host=myhost2 mysql_connect && con2=$HANDLE
+#
+#  HANDLE=$con1 mysql_query "select ..."
+#  HANDLE=$con2 mysql_query "select ..."
+#
+#  HANDLE=$con1 mysql_close
+#  HANDLE=$con2 mysql_close
+
+# set a default here
+export MYSQL_READ_TIMEOUT=10
+
+# usage: HANDLE={connection handle} mysql_check 
+function mysql_check {
+out "mysql_check"
+try
+  local handle
+  handle=(${HANDLE//_/ })
+  if [[ ${#handle[*]} != 3 ]]; then
+    err "HANDLE structure is wrong: HANDLE=$HANDLE"
+    fail
+  fi
+  if ! ps ${handle[2]} &>/dev/null; then
+    err "Process ${handle[2]} is not running."
+    err "ps ${handle[2]}: $(ps ${handle[2]})"
+    fail
+  fi
+  if ! echo "" >&${handle[1]}; then
+    err "Can't write to file descriptor ${handle[1]}"
+    err "previous mysql output:\n$mysql_connect_output"
+    mysql_capture_output || fail
+    err "current mysql output:\n$mysql_connect_output"
+    fail
+  fi
+  out "Successful connection check"
+end_try
+handle_return
+}
+
+# open mysql connection
+# usage: user="myuser" pass="mypass" host="myhost" db="mydb" mysql_connection
+#   host, db, user, and pass are optional
+# returns $HANDLE
+function mysql_connect {
+local argv argc HANDLEID i
+out "mysql_connect host=${host:-} db=${db:-} user=${user:-} pass=${pass:-}"
+try
+  #prepare args
+  argv=($*)
+  argc=${#argv[*]}
+
+  if [ "${host:-}" ]; then
+    host="-h $host "
+  fi
+  if [ "${db:-}" ]; then
+    db="-D $db "
+  fi
+  if [ "${user:-}" ]; then
+    user="-u $user "
+  fi
+  if [ "${pass:-}" ]; then
+    pass="-p$pass "
+  fi
+
+  # init connection and channels
+  # we do it in XML cause otherwise we can't detect the end of data and so would need a read timeout O_o
+  HANDLEID="MYSQL$RANDOM"
+  eval "coproc $HANDLEID { stdbuf -oL mysql ${user:-}${pass:-}${host:-}${db:-} -A --force --unbuffered --xml -vvv 2>&1; }" # 2> /dev/null
+  local in=$(eval 'echo ${'${HANDLEID}'[0]}')
+  local out=$(eval 'echo ${'${HANDLEID}'[1]}')
+  local pid=$(eval 'echo ${'${HANDLEID}'_PID}')
+
+  # move input and output file descriptors to stable ones that the shell won't steal
+  # this breaks the ability to manage multiple connections, but I never use that anyway.
+  # should I ever need that, this can be upgraded to a more complex system 
+  #exec 4<&${in}-
+  #exec 5>&${out}-
+  #in=4
+  #out=5
+
+  export HANDLE="${in}_${out}_${pid}"
+
+  mysql_capture_output || fail
+  if mysql_check $HANDLE; then
+    out "Successful connection established: $HANDLE"
+    break
+  else
+    err "Connection failed to ${user:-}@${host:-}->DB:${db:-}!"
+    echo "$mysql_connect_output"
+    fail
+  fi
+end_try
+handle_return
+}
+
+function mysql_capture_output {
+local handle=(${HANDLE//_/ }) line
+mysql_connect_output=""
+while IFS= read -t 0.5 -ru ${handle[0]} line; do
+  if [ "${mysql_connect_output:-}" ]; then
+    mysql_connect_output="$mysql_connect_output$newline$line"
+  else
+    mysql_connect_output="$line"
+  fi
+done
+return 0
+}
+
+function mysql_flush_output {
+local handle=(${HANDLE//_/ }) line
+while IFS= read -t 0.1 -ru ${handle[0]} line; do
+  :
+  #echo "$line" >>/tmp/sql_output
+done
+return 0
+}
+
+# usage: [HANDLE={handle}] mysql_bulk "{queries}"
+#   will correctly process more than one statement
+#   will not return results
+#   every statement must end with a semicolon at the end of the line (nothing must follow it). 
+function mysql_bulk {
+local handle bulk query affected line results_open row_open cols key val timed_out ready
+bulk=$1
+bulk=$(echo "$bulk" | strip_bar_comments | aligned_trim)
+out "mysql_bulk"
+deep_out "all statements:\n${bulk}"
+try
+  if ! deep_dive mysql_check; then
+    err "Connection not open!"
+    fail
+  fi
+
+  # this complication is needed to avoid piping the value into the while loop, 
+  #   and thus causing mysql_query to run in a subprocesses,
+  #   making it not able to access the mysql connector process
+  sql_delimiter=${sql_delimiter:-\;}
+  while IFS= read -r line; do
+    if [ "$line" ]; then
+      if [ "${query:-}" ]; then
+        query=${query:-}$newline$line
+      else
+        query=$line
+      fi
+    fi
+    if [[ "$line" =~ ^delimiter\ (.*)$ ]]; then
+      sql_delimiter=${BASH_REMATCH[1]}
+      deep_out "Changing delimiter to: [$sql_delimiter]"
+      ready=true
+    fi
+    if [[ "$line" == *$sql_delimiter ]]; then
+      ready=true
+    fi
+    if [ "${ready:-}" ]; then
+      skip_check=true mysql_query "$query" || fail
+      query=""
+      unset ready
+    fi
+  done < <(echo "$bulk"); maybe_break
+
+  if [ "${query:-}" ]; then
+    skip_check=true mysql_query "$query" || fail
+  fi
+end_try
+handle_return
+}
+
+# usage: [HANDLE={handle}] mysql_query "{query}"
+#   for only 1 statement or query. If you want to execute multiple statements, use mysql_bulk
+# return: $DATA[0] = affected rows/number of sets;
+#         $DATA[1] = key=>values pairs following
+#         $DATA[2] = key1; DATA[3] = val1
+#         $DATA[4] = key2; DATA[5] = val2 (depending on number of columns, rows)
+function mysql_query {
+local handle query affected line results_open row_open cols key val timed_out
+query=$1
+query=$(echo "$query" | strip_bar_comments | aligned_trim)
+out "mysql_query\n${query}"
+sql_delimiter=${sql_delimiter:-\;}
+try
+  handle=(${HANDLE//_/ })
+  if [ ! "${skip_check:-}" ]; then
+    if ! deep_dive mysql_check; then
+      err "Connection not open!"
+      fail
+    fi
+  fi
+
+  # use this to keep track of where you are when reading this data
+  export current_row=0
+
+  # delimit query; otherwise we block forever/timeout
+  # nevermind:  if we timeout here, fix the incoming query
+  #   we need to be able to handle alternative delimiters as is required by trigger definitions for example
+  if [[ ! "$query" == *$sql_delimiter ]]; then
+    query="$query$sql_delimiter"
+  fi
+
+  out "Sending query..."
+  echo "$query" >&${handle[1]} || {
+    err "Can't write to file descriptor ${handle[1]}"
+    err "Previous mysql output:\n$mysql_connect_output"
+    mysql_capture_output || fail
+    err "Current mysql output:\n$mysql_connect_output"
+    fail
+  }
+
+  #get output
+  DATA=();
+  DATA[0]=0
+  DATA[1]=0
+  results_open=0
+  row_open=0
+  cols=0
+  deep_dive
+  out "Fetching output..."
+  while IFS= read -t $MYSQL_READ_TIMEOUT -ru ${handle[0]} line
+  do
+    deep_out "Mysql output: [$line]"
+    if [ ! "$line" ]; then
+      if [[ "$query" == use* ]] || [[ "$query" == delimiter* ]]; then
+        deep_out "Exiting early because it's a use or delimiter command."
+        break
+      fi
+    fi
+
+    # WAS ERROR?
+    if [[ "$line" == *"ERROR"* ]]; then
+      err "$line"
+      fail
+    # WAS INSERT/UPDATE?
+    elif [[ "$line" == *"Query OK"* ]]; then
+      affected=$([[ "$line" =~ Query\ OK\,\ ([0-9]+)\ rows?\ affected ]] && echo ${BASH_REMATCH[1]})
+      DATA[0]=$affected
+      export DATA
+      out "Query OK"
+      break
+    fi
+
+    # BEGIN FETCHING RESULTS
+    if [[ $line =~ \<resultset ]]; then
+      results_open=1
+      continue
+    fi
+
+    #RESULTS
+    if [[ $results_open == 1 ]]; then
+      if [[ $line =~ \<row ]]; then
+        out "Row start"
+        row_open=1
+        cols=0
+        continue
+      elif [[ $line =~ \<field && $row_open == 1 ]]; then
+        key=$([[ "$line" =~ name\=\"([^\"]+)\" ]] && echo ${BASH_REMATCH[1]})
+        val=$([[ "$line" =~ \>(.*)\<\/ ]] && echo ${BASH_REMATCH[1]} || echo "NULL")
+        DATA[${#DATA[*]}]=$key
+        DATA[${#DATA[*]}]=$val
+        cols=$[$cols+1]
+        out "Field found: key=$key  val=$val"
+        continue
+      elif [[ $line =~ \<\/row ]]; then
+        out "Row end"
+        row_open=0
+        DATA[0]=$[${DATA[0]}+1]
+        DATA[1]=$cols
+        column_count=$cols
+        continue
+      fi
+    fi
+
+    #END OF RESULTS
+    if [[ $line =~ \<\/resultset ]]; then
+      export DATA
+      break
+    fi
+  done
+  # this must be immediately after the loop, or it won't have the correct return code
+  [[ $? > 0 ]] && [[ return_value == 0 ]] && {
+    err "$FUNCNAME: Read timed out!"
+    fail
+  }
+  deep_undive
+end_try
+handle_return
+}
+
+# returns true if the previous mysql_query command returned 1 or more rows
+function more_rows_to_read {
+  if [[ ${DATA[0]} > $current_row ]]; then
+    return 0
+  fi
+  return 1
+}
+
+# usage: grab_row {var1} {var2}...
+# takes data from the previously run mysql_query command and stores it into the given variables
+# it will always advance to the next row for each call, even if you don't capture all of the columns of the row
+function grab_row {
+  local v next_data_index
+  # take each var and dump a field value into it
+  next_data_index=$((current_row*column_count+2+1))
+  for var_name ; do
+    v=${DATA[$next_data_index]}
+    next_data_index=$((next_data_index+2))
+    v=${v//\"/\\\"}
+    eval "$var_name=\"$v\""
+  done
+  current_row=$((current_row+1))
+}
+
+# usage: db_fetch_single_value "{query}"
+#   sets r={value returned}
+function db_fetch_single_value {
+out "db_fetch_single_value"
+try
+  mysql_query "$1" || return 1
+  if more_rows_to_read; then 
+    out "A row of data was found"
+    grab_row r || return 1
+    out "Assigning result: r=$r"
+  else
+    out "No db results."
+  fi
+end_try
+handle_return
+}
+
+# usage: HANDLE={handle} mysql_close
+function mysql_close {
+  local handle
+  if ! mysql_check; then
+    err "Connection not open!"
+    return 1
+  fi
+  handle=(${1//_/ })
+  echo "exit;" >&${handle[1]}
+
+  if ! mysql_check; then
+    return 0
+  else
+    err "Couldn't close connection!"
+    return 1
+  fi
+}
+

@@ -1,0 +1,73 @@
+#!/bin/bash
+
+# usage: lock {lock name (will be in /var/lock/)} [{max time in seconds to wait for lock}]
+# if timeout is not given, then attempt will immediately fail if it can't get the lock right away
+#   otherwise it will keep trying until the timeout is reached or the lock is obtained.
+lock() {
+local location=$1; shift
+local timeout=${1:-}
+local lockfile=/var/lock/$location
+
+out "Attempting to obtain lock for $location"
+try
+  if [ -d $lockfile ]; then
+    out "Lock folder exists already: $lockfile"
+    pid=$(<$lockfile/pid)
+    if [ "$pid" == $$ ]; then
+      # this process already owns the lock
+      out "This process already owns the lock, so we are done."
+      break
+    fi
+
+    # check to see if the process is still running
+    if [ ! "$pid" ] || ! ps $pid &>/dev/null; then
+      rm -rf $lockfile
+      out "Removed stale lockfile: $lockfile with pid: $pid"
+    fi
+  fi
+
+  timeleft=$timeout
+  local success
+  while true; do
+    mkdir $lockfile &>/dev/null && success=true
+    if [ "${success:-}" ]; then
+      echo $$ >$lockfile/pid
+      break
+    fi
+
+    if [ ! "${timeout:-}" ]; then
+      break
+    fi
+
+    out "Failed to obtain lock. Waiting 5 seconds before trying again."
+    sleep 5
+    timeleft=$((timeleft-5))
+    if [ "$timeleft" -lt 0 ]; then
+      out "Timeout reached. Couldn't obtain the lock in time."
+      break
+    fi
+  done
+end_try
+
+if [ ! "${success:-}" ]; then
+  # failed to obtain lock after timeout
+  out "Failed to obtain lock."
+  fail
+fi
+
+# lock obtained
+out "Succeeded in obtaining lock."
+handle_return
+}
+
+# usage: unlock {lock name (will be in /var/lock/)}
+unlock() {
+local location=$1
+if [ ! "$location" ]; then
+  err "Usage: unlock {lock name}"
+  return 1
+fi
+
+rm -rf /var/lock/$location
+}
+

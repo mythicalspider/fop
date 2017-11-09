@@ -1,0 +1,18 @@
+#!/bin/bash
+
+#fresh_os=true
+#fresh_mariadb=true
+
+while true; do
+  if [ "$fresh_os" ]; then
+    apt-get update || break
+  fi
+  if [ "$fresh_mariadb" ]; then
+    apt-get install mariadb-server || break
+    emerge --config mariadb || break
+    service mysql start || break
+  fi
+  cat ./init_db | mysql -p || break
+  break
+done
+

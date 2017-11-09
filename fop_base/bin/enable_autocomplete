@@ -1,0 +1,4 @@
+#!/bin/bash
+
+complete -o nospace -C bin/build_features_complete build_features 
+

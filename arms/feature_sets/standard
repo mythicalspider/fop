@@ -1,0 +1,12 @@
+cleanup_build_folder
+execution_wrapper
+test
+execute
+central_db_interface db_host=127.0.0.1 db_user=test db_pass=insecure
+hosted_agents_connect_to_db_and_execute_tasks
+property_base
+props_can_be_observed
+#hosted_agents_can_observe
+#user_tracking
+#secure_users
+
