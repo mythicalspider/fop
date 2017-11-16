@@ -8,10 +8,24 @@ dependency
   dependencies are grouped into dep groups
     each dep group have a minimum requirement of specific values
 
+dependency level
+  for a prop class, it has dependencies that fit one of the following levels:
+    exported  child prop is inside of the parent prop, but is available externally by a certain name
+    hidden    child prop is inside of the parent prop, but can't be accessed outside
+    outer     child prop is outside of parent prop
+    needs     depends on a resource
+    provides  generates a resource
+
 expectation status
   G matches
   Y doesn't match, will auto-fix
   R doesn't match, can't auto-fix
+
+fix strategy
+  when an observation differs from an expectation, a fix strategy is needed.
+
+freshness
+  can be either stale or fresh, based on whether the latest config changes are in effect on this service.
 
 intention status
   X pending approval
@@ -42,7 +56,7 @@ property status
     I indigo - no issues: service less than 1/16 usage
     B blue - no issues: performing far above the required levels, lots of resources to spare (1/16 .. 1/4 capacity)
     G green - no issues: within normal operating levels (1/4 .. 3/4 capacity)
-    Y yellow - minor issues: below required levels / over capacity, but still functional. Will need to address this issue eventually.
+    Y yellow - minor issues: below required levels / over capacity, config out of date, but still functional. Will need to address this issue eventually. 
     O orange - major issues: significantly below required performance levels, rare failures happening, but still mostly functional. 
     M flashing orange - major issues: monitoring is failing or unavailable. Status unknown.
     R red - critical issues: services are down or frequently failing. Or missing a critical resource.
@@ -59,8 +73,17 @@ property status
     G service is down
     R service is up
 
+property type
+  config    represents information that exists only in the db, and doesn't affect anything on a host unless something depends on it
+  service   represents something that stays running. Prop value is one of: up, down, clean
+  state     represents something that is changed once. 
+  transform takes config and calculates another config which can be used by other services. Recalculated whenever sources change.
+
 property value
   may be manually or automatically observed  
+
+proposal
+  a user specific request that, if approved and not contradicted, will become an intention.
 
 resource consumer
   a property which needs a certain type of resource. May be manually or automatically provisioned
