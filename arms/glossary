@@ -27,6 +27,9 @@ fix strategy
 freshness
   can be either stale or fresh, based on whether the latest config changes are in effect on this service.
 
+implication
+  an intention that is implied by a proposal. Used to determine resolved intentions. 
+
 intention status
   X pending approval
   G immediate approval: can proceed with the change now
