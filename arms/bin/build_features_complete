@@ -1,3 +1,0 @@
-#!/bin/bash
-
-find feature_sets -type f -printf "%f "
