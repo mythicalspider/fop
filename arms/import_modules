@@ -1,0 +1,6 @@
+#!/bin/bash
+
+cd .. || exit 1
+fop_base/bin/import fop_base arms || exit 1
+find * -type l -not -exec grep -q "^{}$" .gitignore \; -print >> .gitignore
+

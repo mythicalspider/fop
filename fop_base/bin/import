@@ -24,6 +24,6 @@ fi
 for folder in bin lib features ; do
   echo "Linking up $folder..."
   mkdir -p $to_module/$folder || exit 1
-  ln -sF $from_module/$folder/* $to_module/$folder/ || exit 1
+  ln -shF `pwd`/$from_module/$folder/* $to_module/$folder/ || exit 1
 done
 
