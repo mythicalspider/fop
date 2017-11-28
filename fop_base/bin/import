@@ -1,0 +1,29 @@
+#!/bin/bash
+
+from_module="$1"; shift
+to_module="$1"; shift
+
+if [ ! "$to_module" -o "$from_module" = "?" ]; then
+  echo "Usage: $0 {from module} {to module}"
+  echo "  will create links between features / libs of one module to the other"
+  echo "  existing links will be replaced"
+  echo "  missing folders will be created, with the exception of the module folders"
+  exit 1
+fi
+
+if [ ! -d "$from_module" ]; then 
+  echo "$from_module doesn't exist (or isn't a directory)"
+  exit 1
+fi
+
+if [ ! -d "$to_module" ]; then 
+  echo "$to_module doesn't exist (or isn't a directory)"
+  exit 1
+fi
+
+for folder in bin lib features ; do
+  echo "Linking up $folder..."
+  mkdir -p $to_module/$folder || exit 1
+  ln -sF $from_module/$folder/* $to_module/$folder/ || exit 1
+done
+
