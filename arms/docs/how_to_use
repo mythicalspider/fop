@@ -19,7 +19,7 @@ create a property class
   shell commands
     intend property_class tyk_service_status exists
     class=tyk_service_status intend property_class_observer @observer_script_file  # or you could put it in quotes here
-    follow property_class tyk_service_status            # will recheck the status of the given intention every few seconds
+    watch property_class tyk_service_status            # will recheck the status of the given intention every few seconds
     approval property_class tyk_service_status denied   # will deny the given request
     export class=tyk_service_status                     # which makes it apply to the following commands:
     intend property_class_implication tyk_api_installed exists  

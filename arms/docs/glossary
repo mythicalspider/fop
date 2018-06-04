@@ -16,6 +16,19 @@ dependency level
     needs     depends on a resource
     provides  generates a resource
 
+dependency type
+  config
+    config -> config
+    calc -> config
+    calc -> calc
+    calc -> service
+    calc -> state
+  service
+    service -> config
+    service -> calc
+    service -> service
+    service -> state
+
 expectation status
   G matches
   Y doesn't match, will auto-fix
@@ -77,10 +90,12 @@ property status
     R service is up
 
 property type
-  config    represents information that exists only in the db, and doesn't affect anything on a host unless something depends on it
-  service   represents something that stays running. Prop value is one of: up, down, clean
-  state     represents something that is changed once. 
-  transform takes config and calculates another config which can be used by other services. Recalculated whenever sources change.
+  config      represents information that exists only in the db, and doesn't affect anything on a host unless something depends on it
+              intention = expectation = observation
+  service     represents something that stays running. Prop value is one of: up, down, clean
+  state       represents something that is changed once. ex: file permission, user existence.
+  calculation takes config and calculates another config which can be used by other services. Recalculated whenever sources change.
+              intention optional
 
 property value
   may be manually or automatically observed  
