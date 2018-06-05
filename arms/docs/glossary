@@ -18,8 +18,9 @@ dependency level
 
 dependency type
   config
-    config -> config
     calc -> config
+      can have a var assigned per dependency representing the value 
+      if not specified, automatically uses config name
     calc -> calc
     calc -> service
     calc -> state
@@ -27,6 +28,9 @@ dependency type
     service -> config
     service -> calc
     service -> service
+      restart : requires downtime through the restart action before config is updated
+      reload : requires reload without downtime
+      instant : doesn't require any action for config change to take effect
     service -> state
 
 expectation status
@@ -34,8 +38,15 @@ expectation status
   Y doesn't match, will auto-fix
   R doesn't match, can't auto-fix
 
+failure tolerance
+  each severity for a given intention has a failure tolerance (in seconds)
+  the severity level isn't triggerred unless the tolerance is exceeded
+  fixes also have a tolerance assigned
+
 fix strategy
   when an observation differs from an expectation, a fix strategy is needed.
+  each fix strategy has a tolerance assigned (in seconds). The fix will not be scheduled until the failure is older than the
+  tolerance.
 
 freshness
   can be either stale or fresh, based on whether the latest config changes are in effect on this service.
@@ -92,10 +103,14 @@ property status
 property type
   config      represents information that exists only in the db, and doesn't affect anything on a host unless something depends on it
               intention = expectation = observation
-  service     represents something that stays running. Prop value is one of: up, down, clean
-  state       represents something that is changed once. ex: file permission, user existence.
   calculation takes config and calculates another config which can be used by other services. Recalculated whenever sources change.
               intention optional
+  service     represents something that stays running. Prop value is one of: up, down, clean
+  state       represents something that is changed once. ex: file permission, user existence.
+  batch       designed to regularly fail (when a scheduled event is overdue, or whatever), and execute the "fix" each time
+              by default severity is 0 unless a certain amount of time has passed without a fix
+  provider    provides resources for consumers. Units may be divisible or discrete.
+  consumer    like a config prop, but value comes from a linked provider. Setting this value allocates a resource from the provider. Possible to fail.
 
 property value
   may be manually or automatically observed  
@@ -103,12 +118,6 @@ property value
 proposal
   a user specific request that, if approved and not contradicted, will become an intention.
 
-resource consumer
-  a property which needs a certain type of resource. May be manually or automatically provisioned
-
-resource provider
-  a property which contains resources which may be automatically or manually provisioned to another property.
-  
 user
   may represent a human or a special automation user
 

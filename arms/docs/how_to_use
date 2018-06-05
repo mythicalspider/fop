@@ -1,8 +1,3 @@
-state intention values: 
-  exists
-  absent
-  -       # no intention specified, cancells out previous intention
-
 can only do as root user:
   create admin users
   add them to admin group
@@ -11,22 +6,22 @@ can only do as an admin user:
   call add_user function
   call add_user_group function 
 
+monitor user:
+  can observe anything, but can't change anything
+
 create a property group
-  shell commands
-    intend property_group tyk_1a exists   
+  intend property_group tyk_1a exists   
 
 create a property class
-  shell commands
-    intend property_class tyk_service_status exists
-    class=tyk_service_status intend property_class_observer @observer_script_file  # or you could put it in quotes here
-    watch property_class tyk_service_status            # will recheck the status of the given intention every few seconds
-    approval property_class tyk_service_status denied   # will deny the given request
-    export class=tyk_service_status                     # which makes it apply to the following commands:
-    intend property_class_implication tyk_api_installed exists  
-      # but how does the system know whether to create a new property or reuse an existing one?
+  intend property_class tyk_service_status exists
+  class=tyk_service_status intend property_class_observer @observer_script_file  # or you could put it in quotes here
+  watch property_class tyk_service_status            # will recheck the status of the given intention every few seconds
+  approval property_class tyk_service_status denied   # will deny the given request
+  export class=tyk_service_status                     # which makes it apply to the following commands:
+  intend property_class_implication tyk_api_installed exists  
+    # but how does the system know whether to create a new property or reuse an existing one?
 
 create a property
-  shell commands
-    class=tyk_service_status intend property tyk_service_status exists
-    # class can actually be inferred here, and if left off without being able to infer it, the script will fail and show usage 
+  class=tyk_service_status intend property tyk_service_status exists
+  # class can actually be inferred here, and if left off without being able to infer it, the script will fail and show usage 
 
